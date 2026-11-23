@@ -1,0 +1,8 @@
+{
+  "_comment": "Single source of truth for analytics event names, read by both engine and web. Copy names from 03-build/analytics/event-schema.md; never type them inline.",
+  "DOCUMENT_UPLOADED": "document_uploaded",
+  "DOCUMENT_INDEXED": "document_indexed",
+  "QUESTION_ASKED": "question_asked",
+  "ANSWER_RETURNED": "answer_returned",
+  "SOURCE_OPENED": "source_opened"
+}
