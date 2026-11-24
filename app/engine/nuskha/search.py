@@ -26,12 +26,19 @@ ORDER BY c.embedding <=> %(vec)s LIMIT %(k)s
 
 # Georgian has no Postgres stemmer and stacks suffixes (ხელშეკრულება / ხელშეკრულების / ხელშეკრულებაში),
 # so keyword matching uses trigram word similarity per query term instead of full-text search.
+# Candidates come from the `<%` operator (served by chunks_norm_trgm_idx; a word_similarity() call in
+# HAVING can't use the index), then each candidate is scored against every term.
+_KEYWORD_THRESHOLD = 0.5
 _KEYWORD_SQL = """
-SELECT c.id, sum(word_similarity(t, c.norm)) AS score
-FROM chunks c JOIN documents d ON d.id = c.document_id, unnest(%(terms)s::text[]) AS t
-WHERE d.owner_id = %(owner)s AND d.status = 'ready'
-GROUP BY c.id HAVING max(word_similarity(t, c.norm)) >= 0.5
-ORDER BY score DESC LIMIT %(k)s
+WITH candidates AS (
+  SELECT DISTINCT c.id, c.norm
+  FROM unnest(%(terms)s::text[]) AS t(term)
+  JOIN chunks c ON t.term <%% c.norm  -- psycopg: %% is a literal %
+  JOIN documents d ON d.id = c.document_id
+  WHERE d.owner_id = %(owner)s AND d.status = 'ready'
+)
+SELECT id, (SELECT sum(word_similarity(t, norm)) FROM unnest(%(terms)s::text[]) AS t) AS score
+FROM candidates ORDER BY score DESC LIMIT %(k)s
 """
 
 
@@ -48,6 +55,8 @@ def search(owner_id: str, query: str, top_k: int = 6, per_list: int = 20) -> lis
     vectors = embed(variants)
     rankings: list[list[int]] = []
     with db.conn() as c:
+        # `<%` matches at word_similarity >= this setting; LOCAL keeps it to this transaction.
+        c.execute(f"SET LOCAL pg_trgm.word_similarity_threshold = {_KEYWORD_THRESHOLD}")
         for variant, vec in zip(variants, vectors):
             rows = c.execute(_VECTOR_SQL, {"owner": owner_id, "vec": np.array(vec), "k": per_list}).fetchall()
             rankings.append([r["id"] for r in rows])
