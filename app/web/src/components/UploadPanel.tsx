@@ -15,8 +15,8 @@ export function UploadPanel(props: { onUploaded: () => void }) {
     for (const file of Array.from(files)) {
       setBusy((b) => [...b, file.name]);
       try {
-        const doc = await api.upload(file);
-        if (doc.status === "failed") setError(`${doc.filename}: ${doc.error}`);
+        await api.upload(file);
+        // Indexing continues on the server; the document list shows its progress and any error.
         // document_uploaded / document_indexed are system events fired by the engine after commit.
       } catch (e) {
         setError(`${file.name}: ${(e as Error).message}`);

@@ -32,7 +32,13 @@ def _upload(client, user, samples, name):
     with open(samples / name, "rb") as f:
         r = client.post("/documents", files={"file": (name, f)}, headers=user)
     assert r.status_code == 200, r.text
-    return r.json()
+    assert r.json()["status"] == "processing"  # indexing runs after the response
+    return _doc(client, user, r.json()["id"])
+
+
+def _doc(client, user, doc_id):
+    """The current row. TestClient runs background tasks before returning, so indexing has finished."""
+    return next(d for d in client.get("/documents", headers=user).json() if d["id"] == doc_id)
 
 
 def test_upload_index_ask_open(client, user, samples):

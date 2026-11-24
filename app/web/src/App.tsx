@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js";
+import { createMemo, createSignal, Errored, Loading, onCleanup, refresh, Show } from "solid-js";
 import { type Answer, type Citation, type Doc, api } from "./api";
 import { track } from "./analytics";
 import { AnswerView } from "./components/AnswerView";
@@ -8,7 +8,15 @@ import { UploadPanel } from "./components/UploadPanel";
 import { Spinner } from "./components/ui";
 
 export function App() {
-  const docs = createMemo(() => api.listDocuments());
+  // Indexing runs on the server after upload: re-fetch while any document is still processing.
+  let poll: ReturnType<typeof setTimeout> | undefined;
+  const docs = createMemo(async () => {
+    const list = await api.listDocuments();
+    clearTimeout(poll);
+    if (list.some((d) => d.status === "processing")) poll = setTimeout(() => refresh(docs), 2000);
+    return list;
+  });
+  onCleanup(() => clearTimeout(poll));
   const [answer, setAnswer] = createSignal<Answer | null>(null);
   const [asking, setAsking] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);

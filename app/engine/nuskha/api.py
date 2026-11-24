@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import numpy as np
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from psycopg.types.json import Jsonb
@@ -54,6 +54,11 @@ def _owner(user_id: str | None) -> str:
     return user_id
 
 
+# Indexing takes seconds to a few minutes (LibreOffice conversion is capped at 2). A row still 'processing'
+# after this long lost its worker to a restart or crash, and is shown as failed instead of spinning forever.
+_STALE_AFTER = "15 minutes"
+_INTERRUPTED = "Indexing was interrupted. Upload the file again."
+
 _DOC_COLS = "id, filename, content_type, size_bytes, status, error, page_count, chunk_count, georgian_ratio, legacy_font_fixed, created_at"
 
 
@@ -68,11 +73,16 @@ def health():
 def list_documents(x_user_id: str | None = Header(None)):
     owner = _owner(x_user_id)
     with db.conn() as c:
+        c.execute(
+            f"UPDATE documents SET status='failed', error=%s WHERE owner_id=%s AND status='processing' "
+            f"AND created_at < now() - interval '{_STALE_AFTER}'", (_INTERRUPTED, owner),
+        )
         return c.execute(f"SELECT {_DOC_COLS} FROM documents WHERE owner_id = %s ORDER BY created_at DESC", (owner,)).fetchall()
 
 
 @app.post("/documents")
-def upload_document(file: UploadFile = File(...), x_user_id: str | None = Header(None)):
+def upload_document(background: BackgroundTasks, file: UploadFile = File(...), x_user_id: str | None = Header(None)):
+    """Stores the file and returns its row as 'processing'; indexing runs after the response is sent."""
     owner = _owner(x_user_id)
     filename = file.filename or "document"
     ext = filename[filename.rfind("."):].lower() if "." in filename else ""
@@ -92,7 +102,13 @@ def upload_document(file: UploadFile = File(...), x_user_id: str | None = Header
             (doc_id, owner, filename, content_type, len(data), key),
         )
     analytics.capture(owner, "DOCUMENT_UPLOADED", {"document_id": doc_id, "file_type": ext.lstrip("."), "size_bytes": len(data)})
+    background.add_task(_index, doc_id, owner, filename, data)
+    with db.conn() as c:
+        return c.execute(f"SELECT {_DOC_COLS} FROM documents WHERE id = %s", (doc_id,)).fetchone()
 
+
+def _index(doc_id: str, owner: str, filename: str, data: bytes) -> None:
+    """Parse, chunk, embed, store. Never raises: failures are written to the row for the user to see."""
     started = time.monotonic()
     try:
         parsed = parse(filename, data)
@@ -116,11 +132,11 @@ def upload_document(file: UploadFile = File(...), x_user_id: str | None = Header
             "duration_ms": int((time.monotonic() - started) * 1000),
         })
     except Exception as e:  # keep the row so the user sees why it failed
-        with db.conn() as c:
-            c.execute("UPDATE documents SET status='failed', error=%s WHERE id=%s", (str(e)[:500], doc_id))
-
-    with db.conn() as c:
-        return c.execute(f"SELECT {_DOC_COLS} FROM documents WHERE id = %s", (doc_id,)).fetchone()
+        try:
+            with db.conn() as c:
+                c.execute("UPDATE documents SET status='failed', error=%s WHERE id=%s", (str(e)[:500], doc_id))
+        except Exception as db_error:  # the stale sweep in list_documents marks it failed later
+            print(f"Could not record indexing failure for {doc_id}: {db_error}", flush=True)
 
 
 def _file_sig(doc_id: str, exp: int) -> str:
