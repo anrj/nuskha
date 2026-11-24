@@ -84,6 +84,6 @@ SELECT count(*) FROM source_opens WHERE owner_id NOT LIKE 'test-%';  -- must equ
 
 ## Deploy
 
-- **Engine:** Render via [`render.yaml`](render.yaml) (or Railway/Fly), `DATABASE_URL` from Neon, originals in Cloudflare R2 (`FILE_STORE=s3`).
+- **Engine:** Render via [`render.yaml`](render.yaml) (or Railway/Fly), `DATABASE_URL` from Neon, originals in Cloudflare R2 (`FILE_STORE=s3`). Set `FILE_URL_SECRET` (signs the short-lived links that open original files; `render.yaml` generates one).
 - **Web:** Vercel or Cloudflare Pages, root `app/web`, build `bun run build`, output `dist`, set `VITE_API_URL` and `VITE_POSTHOG_KEY`.
 - Secrets only in host environment variables.

@@ -1,6 +1,7 @@
 """All settings come from environment variables (.env locally, host env vars in production)."""
 import json
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,6 +55,11 @@ class Settings:
     s3_bucket: str = field(default_factory=lambda: _env("S3_BUCKET"))
     s3_access_key: str = field(default_factory=lambda: _env("S3_ACCESS_KEY_ID"))
     s3_secret_key: str = field(default_factory=lambda: _env("S3_SECRET_ACCESS_KEY"))
+
+    # Signs the short-lived links that open original files. Without it, a random per-process secret is used:
+    # fine for one process, but links then break on restart and across several workers.
+    file_url_secret: str = field(default_factory=lambda: _env("FILE_URL_SECRET") or secrets.token_hex(32))
+    file_url_ttl_s: int = field(default_factory=lambda: int(_env("FILE_URL_TTL_S", "900")))
 
     environment: str = field(default_factory=lambda: _env("APP_ENV", "development"))  # "production" on the host
     posthog_key: str = field(default_factory=lambda: _env("POSTHOG_KEY"))

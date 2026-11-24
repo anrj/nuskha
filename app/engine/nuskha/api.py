@@ -1,4 +1,6 @@
 """HTTP API for the journey: upload -> index -> ask -> cited answer -> open source."""
+import hashlib
+import hmac
 import mimetypes
 import re
 import time
@@ -121,20 +123,33 @@ def upload_document(file: UploadFile = File(...), x_user_id: str | None = Header
         return c.execute(f"SELECT {_DOC_COLS} FROM documents WHERE id = %s", (doc_id,)).fetchone()
 
 
+def _file_sig(doc_id: str, exp: int) -> str:
+    msg = f"{doc_id}.{exp}".encode()
+    return hmac.new(settings.file_url_secret.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def _file_url(doc_id: str) -> str:
+    """A link to the original that expires and names no user: it ends up in history, logs and Referer headers."""
+    exp = int(time.time()) + settings.file_url_ttl_s
+    return f"/documents/{doc_id}/file?exp={exp}&sig={_file_sig(doc_id, exp)}"
+
+
 @app.get("/documents/{doc_id}/file")
-def get_file(doc_id: uuid.UUID, u: str):
-    """Opened in a new tab (no custom headers possible), so the owner id comes as ?u=."""
-    owner = _owner(u)
+def get_file(doc_id: uuid.UUID, exp: int, sig: str):
+    """Opened in a new tab (no custom headers possible), so access comes from the signed link."""
+    if exp < time.time() or not hmac.compare_digest(sig, _file_sig(str(doc_id), exp)):
+        raise HTTPException(403, "This link has expired. Open the source again from the answer.")
     with db.conn() as c:
-        row = c.execute(
-            "SELECT filename, content_type, storage_key FROM documents WHERE id=%s AND owner_id=%s", (doc_id, owner)
-        ).fetchone()
+        row = c.execute("SELECT filename, content_type, storage_key FROM documents WHERE id=%s", (doc_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Document not found")
     disposition = "inline" if row["content_type"] in ("application/pdf", "text/plain", "text/markdown", "text/csv") else "attachment"
     return Response(
         file_store.get(row["storage_key"]), media_type=row["content_type"],
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{_quote(row['filename'])}"},
+        headers={
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{_quote(row['filename'])}",
+            "Referrer-Policy": "no-referrer", "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -212,5 +227,5 @@ def open_source(body: SourceOpenIn, x_user_id: str | None = Header(None)):
         ).fetchone()["id"]
     return {
         "id": sid, "document_id": row["document_id"], "page": row["page"],
-        "url": f"/documents/{row['document_id']}/file?u={owner}#page={row['page']}",
+        "url": f"{_file_url(str(row['document_id']))}#page={row['page']}",
     }

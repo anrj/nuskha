@@ -67,8 +67,11 @@ def test_upload_index_ask_open(client, user, samples):
     opened = client.post("/source-opens", json={"question_id": body["question_id"], "chunk_id": top["chunk_id"]}, headers=user)
     assert opened.status_code == 200, opened.text
     url = opened.json()["url"]
+    assert user["X-User-Id"] not in url  # the owner id must never appear in a link
     f = client.get(url.split("#")[0])
     assert f.status_code == 200 and len(f.content) > 0
+    path = url.split("?")[0]
+    assert client.get(f"{path}?u={user['X-User-Id']}").status_code == 422  # owner-id links no longer work
 
 
 def test_owner_isolation(client, samples):
