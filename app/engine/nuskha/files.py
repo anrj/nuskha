@@ -17,6 +17,9 @@ class LocalFileStore:
     def get(self, key: str) -> bytes:
         return (self.root / key).read_bytes()
 
+    def delete(self, key: str) -> None:
+        (self.root / key).unlink(missing_ok=True)
+
 
 class S3FileStore:
     def __init__(self):
@@ -33,6 +36,9 @@ class S3FileStore:
 
     def get(self, key: str) -> bytes:
         return self.s3.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+
+    def delete(self, key: str) -> None:
+        self.s3.delete_object(Bucket=self.bucket, Key=key)  # no error if it's already gone
 
 
 file_store = S3FileStore() if settings.file_store == "s3" else LocalFileStore(settings.files_dir)

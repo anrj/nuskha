@@ -84,3 +84,15 @@ def test_rejects_bad_requests(client, user):
     assert r.status_code == 415
     r = client.post("/documents", files={"file": ("broken.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 600)}, headers=user)
     assert r.status_code == 200 and r.json()["status"] == "failed" and ".docx" in r.json()["error"]
+
+
+def test_delete_document(client, samples):
+    owner = {"X-User-Id": f"test-{uuid.uuid4().hex[:12]}"}
+    doc = _upload(client, owner, samples, "invoice.pdf")
+    other = {"X-User-Id": f"test-{uuid.uuid4().hex[:12]}"}
+    assert client.delete(f"/documents/{doc['id']}", headers=other).status_code == 404  # not theirs
+    assert client.delete(f"/documents/{doc['id']}", headers=owner).status_code == 204
+    assert client.get("/documents", headers=owner).json() == []
+    r = client.post("/ask", json={"question": "gadaxdis vada"}, headers=owner).json()
+    assert r["citations"] == []
+    assert client.delete(f"/documents/{doc['id']}", headers=owner).status_code == 404

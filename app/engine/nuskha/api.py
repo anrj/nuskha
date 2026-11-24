@@ -138,6 +138,23 @@ def get_file(doc_id: uuid.UUID, u: str):
     )
 
 
+@app.delete("/documents/{doc_id}", status_code=204)
+def delete_document(doc_id: uuid.UUID, x_user_id: str | None = Header(None)):
+    """Removes the document, its chunks and source opens (FK cascade), then the original file."""
+    owner = _owner(x_user_id)
+    with db.conn() as c:
+        row = c.execute(
+            "DELETE FROM documents WHERE id=%s AND owner_id=%s RETURNING storage_key", (doc_id, owner)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Document not found")
+    try:
+        file_store.delete(row["storage_key"])
+    except Exception as e:  # the row is gone, so the file is unreachable; log and move on
+        print(f"Could not delete stored file {row['storage_key']}: {e}", flush=True)
+    return Response(status_code=204)
+
+
 def _quote(name: str) -> str:
     from urllib.parse import quote
 

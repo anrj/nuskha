@@ -63,6 +63,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const body = await res.json().catch(() => ({}));
     throw new Error(typeof body.detail === "string" ? body.detail : `Request failed (${res.status})`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -79,6 +80,7 @@ export const api = {
     form.append("file", file);
     return request<Doc>("/documents", { method: "POST", body: form });
   },
+  deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: "DELETE" }),
   ask: (question: string) => request<Answer>("/ask", json({ question })),
   openSource: (question_id: string, chunk_id: number) =>
     request<SourceOpen>("/source-opens", json({ question_id, chunk_id })),

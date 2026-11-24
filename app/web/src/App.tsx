@@ -1,5 +1,5 @@
 import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js";
-import { type Answer, type Citation, api } from "./api";
+import { type Answer, type Citation, type Doc, api } from "./api";
 import { track } from "./analytics";
 import { AnswerView } from "./components/AnswerView";
 import { AskPanel } from "./components/AskPanel";
@@ -29,6 +29,13 @@ export function App() {
     } finally {
       setAsking(false);
     }
+  }
+
+  async function deleteDocument(doc: Doc) {
+    await api.deleteDocument(doc.id);
+    // An answer citing the deleted file would now open nothing.
+    if (answer()?.citations.some((c) => c.document_id === doc.id)) setAnswer(null);
+    refresh(docs);
   }
 
   async function openSource(c: Citation) {
@@ -68,7 +75,7 @@ export function App() {
         <UploadPanel onUploaded={() => refresh(docs)} />
         <Errored fallback={(err) => <p class="text-sm text-red-600">ვერ ჩაიტვირთა: {String(err())}</p>}>
           <Loading fallback={<p class="flex items-center gap-2 text-sm text-stone-500"><Spinner /> იტვირთება…</p>}>
-            <DocumentList docs={docs()} />
+            <DocumentList docs={docs()} onDelete={deleteDocument} />
           </Loading>
         </Errored>
       </div>
